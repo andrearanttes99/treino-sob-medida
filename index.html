@@ -689,7 +689,7 @@ const PROVIDERS={
 };
 const EXT_KEY=KEY+'.ia';let iaSetup=false;
 // Endereço do servidor do app (Cloudflare Worker com a chave do Gemini). Vazio = cada pessoa usa a própria chave.
-const APP_SERVER=window.TREINO_SERVER||'';
+const APP_SERVER=window.TREINO_SERVER||(location.hostname==='andrearanttes99.github.io'?'https://treino.andre-aranttes99.workers.dev/':'');
 function extCfg(){try{const c=JSON.parse(localStorage.getItem(EXT_KEY));if(c&&PROVIDERS[c.provider])return c}catch(_){}return {provider:'gemini',key:'',model:''}}
 function saveExt(c){try{localStorage.setItem(EXT_KEY,JSON.stringify(c))}catch(_){toast('Não consegui salvar a chave neste navegador')}}
 function renderExtSetup(c){
