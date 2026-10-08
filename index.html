@@ -139,6 +139,7 @@ td.n,th.n{text-align:right;font-family:var(--f-mono);font-size:.85rem;white-spac
 .sugs{display:flex;flex-wrap:wrap;gap:6px}
 .sugs button{font-weight:500;font-size:.85rem;border-radius:999px;padding:6px 12px}
 .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+details.card summary{cursor:pointer;display:flex;flex-wrap:wrap;gap:6px;align-items:baseline}
 footer{margin-top:32px;font-size:.82rem;color:var(--muted)}
 @media (prefers-reduced-motion:no-preference){nav button{transition:color .15s,border-color .15s}}
 </style>
@@ -435,7 +436,7 @@ function renderProgresso(){
   </section>`;
 }
 
-let confirmDel=false,aiDraft=null,aiText='';
+let confirmDel=false,aiDraft=null,aiText='',openImport=false;
 const DAYWORDS=[['segunda','seg','monday','mon'],['terça','terca','ter','tuesday','tue'],['quarta','qua','wednesday','wed'],['quinta','qui','thursday','thu'],['sexta','sex','friday','fri'],['sábado','sabado','sáb','sab','saturday','sat'],['domingo','dom','sunday','sun']];
 const L_=String.raw`\p{L}`;
 function findDays(line){
@@ -493,12 +494,11 @@ function aiCard(p){
   const st=p.custom?(p.custom.active?`<div class="status"><span>Usando o treino importado em ${brDate(p.custom.importedAt)}.</span><button type="button" id="autoPlan">Voltar ao plano automático</button></div>`:`<div class="status"><span>Há um treino importado em ${brDate(p.custom.importedAt)} guardado.</span><button type="button" id="reuseAI">Usar de novo</button></div>`):'';
   const prev=aiDraft?`<div class="card"><h3>Confira antes de usar</h3>${planPreview(aiDraft)}
     <div class="row"><button type="button" class="primary" id="applyAI">Usar este treino</button><button type="button" id="cancelAI">Cancelar</button></div></div>`:'';
-  return `<div class="card ai" id="aiBox"><h2>Treino de outra IA</h2>
-  <p class="muted">Use o treino do ChatGPT, Gemini ou outra IA. O app separa os exercícios em cada dia da semana e passa a usar esse treino no Plano e no Treino.</p>
-  ${st}
+  return `${st}<details class="card ai" id="aiBox" ${aiDraft||aiText||openImport?'open':''}><summary><b>Colar treino de outra IA</b> <span class="muted">sem chave, pelo app do ChatGPT ou do Gemini</span></summary>
+  <p class="muted">Peça o treino no ChatGPT, Gemini ou outra IA e cole a resposta. O app separa os exercícios em cada dia da semana.</p>
   <div class="field"><label for="ai-prompt">1. Copie este pedido e cole na IA</label><textarea id="ai-prompt" rows="5" readonly>${esc(aiPrompt(p))}</textarea><div class="row"><button type="button" id="copyPrompt">Copiar pedido</button></div></div>
   <div class="field"><label for="ai-text">2. Cole aqui a resposta da IA</label><textarea id="ai-text" rows="8" placeholder="Segunda: Pernas&#10;- Agachamento 3x12&#10;- Leg press 3x15&#10;&#10;Terça: Descanso">${esc(aiText)}</textarea><div class="row"><button type="button" class="primary" id="parseAI">Ler treino</button></div></div>
-  ${prev}</div>`;
+  ${prev}</details>`;
 }
 function dayChips(name,sel){return `<div class="chips">${DAYS.map((d,i)=>`<label class="chip"><input type="checkbox" name="${name}" value="${i}" ${sel.includes(i)?'checked':''}> ${d}</label>`).join('')}</div>`}
 function renderPerfil(){
@@ -523,7 +523,7 @@ function renderPerfil(){
   </div>
   <div class="row"><button class="primary" type="submit">Salvar perfil</button><button type="button" id="newP">Novo perfil</button>${S.profiles.length>1?`<button type="button" class="danger" id="delP">Excluir perfil</button>`:''}</div>
   ${confirmDel?`<div class="confirm"><span>Excluir ${esc(p.name)} e todos os registros?</span><button type="button" class="danger" id="delYes">Excluir</button><button type="button" id="delNo">Cancelar</button></div>`:''}
-  </form>${aiCard(p)}</section>`;
+  </form></section>`;
 }
 
 /* ---------- fotos e registros (IndexedDB, fica no aparelho) ---------- */
@@ -655,6 +655,7 @@ function renderIA(){
   <div class="chat" id="chat">${msgs}${aiBusy?`<div class="msg bot" id="thinking">Pensando...</div>`:''}</div>
   <div class="composer"><label for="ia-in" class="sr">Sua mensagem</label><textarea id="ia-in" rows="3" placeholder="Ex.: quero treinar 3 vezes por semana com foco em braços e abdômen" ${aiBusy?'disabled':''}></textarea>
   <div class="row">${aiBusy?`<button type="button" id="iaStop">Parar</button>`:`<button type="button" class="primary" id="iaSend">Enviar</button>`}${chat.length&&!aiBusy?`<button type="button" id="iaClear">Limpar conversa</button>`:''}</div></div>
+  ${aiCard(P())}
   </section>`;
 }
 async function sendIA(text){
@@ -701,7 +702,7 @@ function renderExtSetup(c){
   <p class="muted">${pv.help} Crie a chave em <b style="overflow-wrap:anywhere">${pv.keyUrl}</b>. Não compartilhe a chave com ninguém.</p>
   <div class="row"><button class="primary" type="submit">Salvar e conversar</button>${c.key?`<button type="button" id="extRemove" class="danger">Remover chave</button>`:''}${c.key?`<button type="button" id="extBack">Voltar</button>`:''}</div>
   </form>
-  <div class="card"><h3>Sem chave?</h3><p class="muted">Use o importador: peça o treino no app do ChatGPT ou do Gemini e cole a resposta.</p><div class="row"><button type="button" id="goPerfil">Abrir importador</button></div></div></section>`;
+  ${aiCard(P())}</section>`;
 }
 async function askExternal(rules,turns,signal){
   const c=extCfg(),pv=PROVIDERS[c.provider],model=(c.model||pv.model).trim();
@@ -807,7 +808,7 @@ view.addEventListener('click',e=>{
   }
   if(id==='checkin'){const pl=buildPlan(P());L().checkins[isoToday()]=pl.week[todayIdx()].cls||'extra';save();toast('Check-in feito. Bom treino!');render()}
   if(id==='uncheck'){delete L().checkins[isoToday()];save();toast('Check-in desfeito');render()}
-  if(id==='goPerfil'){tab='perfil';render();const b=document.getElementById('aiBox');if(b)b.scrollIntoView()}
+  if(id==='goPerfil'){tab='ia';openImport=true;render();openImport=false;const b=document.getElementById('aiBox');if(b)b.scrollIntoView()}
   if(id==='copyPrompt'){const ta=document.getElementById('ai-prompt');const done=()=>toast('Pedido copiado. Cole na IA.');
     try{navigator.clipboard.writeText(ta.value).then(done,()=>{ta.select();toast('Selecionei o texto. Copie com Ctrl+C ou segurando o dedo.')})}catch(_){ta.select();toast('Selecionei o texto. Copie com Ctrl+C ou segurando o dedo.')}}
   if(id==='parseAI'){aiDraft=parseAI(document.getElementById('ai-text').value);aiText=document.getElementById('ai-text').value;
