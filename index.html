@@ -106,6 +106,13 @@ td.n,th.n{text-align:right;font-family:var(--f-mono);font-size:.85rem;white-spac
 .cmp figcaption{font-size:.85rem;color:var(--muted)}
 .cmp figcaption b{color:var(--ink);font-family:var(--f-display);font-size:1.05rem}
 #r-prev img{max-width:140px;border-radius:8px;display:block}
+.checkin{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:12px;border-color:var(--accent)}
+.checkin .done{background:var(--ok);border-color:var(--ok);color:var(--accent-ink)}
+.day .ck{font-size:.75rem;font-weight:600;color:var(--ok)}
+.day.done{outline:2px solid var(--ok);outline-offset:-2px}
+.ai textarea{width:100%;font-size:.9rem}
+.ai textarea[readonly]{color:var(--muted);font-family:var(--f-mono);font-size:.78rem}
+.status{display:flex;flex-wrap:wrap;gap:8px;align-items:center;background:var(--accent-soft);padding:10px 12px;border-radius:8px}
 footer{margin-top:32px;font-size:.82rem;color:var(--muted)}
 @media (prefers-reduced-motion:no-preference){nav button{transition:color .15s,border-color .15s}}
 </style>
@@ -196,7 +203,7 @@ try{S=JSON.parse(localStorage.getItem(KEY))}catch(e){S=null}
 if(!S||!S.profiles||!S.profiles.length)S=seed();
 function save(){try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){}}
 const P=()=>S.profiles.find(p=>p.id===S.active)||S.profiles[0];
-const L=()=>(S.logs[P().id]=S.logs[P().id]||{weights:[],workouts:[]});
+const L=()=>{const l=(S.logs[P().id]=S.logs[P().id]||{weights:[],workouts:[]});l.checkins=l.checkins||{};return l};
 
 /* ---------- utilidades ---------- */
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -263,8 +270,17 @@ function buildPlan(p){
     return {id:split[i]+'-'+day,day,title:tpl.t,letter:String.fromCharCode(65+i),exercises};
   });
 
+  let custom=null;
+  if(p.custom&&p.custom.active){
+    custom=p.custom;workouts.length=0;let li=0;
+    Object.keys(custom.days).map(Number).sort((a,b)=>a-b).forEach(day=>{
+      const d=custom.days[day];if(!d.exercises.length)return;
+      workouts.push({id:'c-'+day,day,title:d.title,letter:String.fromCharCode(65+li++),exercises:d.exercises.map(e=>({key:'c:'+e.name.toLowerCase(),name:e.name,sets:e.sets||1,reps:e.reps||'',load:!/\b(s|seg|min|minutos|segundos|m|km)\b|máx|falha/i.test(e.reps||'')&&!!e.sets,notes:e.note?[e.note]:[],free:!e.sets}))});
+    });
+  }
   const week=DAYS.map((d,i)=>{
     const w=workouts.find(x=>x.day===i);
+    if(custom&&!w&&custom.days[i])return {cls:/descanso|folga|off/i.test(custom.days[i].title)?'':'sport',text:custom.days[i].title};
     if(w)return {cls:'lift',text:'Treino '+w.letter+': '+w.title};
     if(sportDays.includes(i))return {cls:'sport',text:SPORTS[p.sport]};
     return {cls:'',text:'Descanso ou caminhada leve'};
@@ -275,16 +291,27 @@ function buildPlan(p){
   if(flags.includes('circ')&&CONTACT.includes(p.sport))alerts.push([SPORTS[p.sport]+' sem contato','Faça só aulas técnicas, sem luta com contato, até o médico liberar. Quem usa anticoagulante tem mais risco de sangramento ao levar golpes.']);
   if(flags.includes('knee')||flags.includes('shoulder')||flags.includes('back'))alerts.push(['Lesões','Os exercícios que forçam a região já foram trocados. Se doer, pare e procure um fisioterapeuta.']);
   if(bmi>=30||p.age>=40)alerts.push(['Avaliação antes de começar','Faça um check-up com exames e eletrocardiograma antes de treinar forte.']);
-  if(n===0)alerts.push(['Sem dias de musculação','Escolha pelo menos 2 dias no perfil para montar os treinos.']);
-  if(n>=3&&adj>=2&&n<5)alerts.push(['Dias seguidos','Como os treinos caem em dias seguidos, cada um trabalha uma parte diferente do corpo para dar tempo de recuperação.']);
+  if(!custom&&n===0)alerts.push(['Sem dias de musculação','Escolha pelo menos 2 dias no perfil para montar os treinos.']);
+  if(!custom&&n>=3&&adj>=2&&n<5)alerts.push(['Dias seguidos','Como os treinos caem em dias seguidos, cada um trabalha uma parte diferente do corpo para dar tempo de recuperação.']);
 
-  return {bmi,healthy,target,weeks,kcal,prot,fat,carb,water,workouts,week,alerts,sessions};
+  return {bmi,healthy,target,weeks,kcal,prot,fat,carb,water,workouts,week,alerts,sessions,custom};
 }
 
 /* ---------- telas ---------- */
 let tab='plano';
 const view=document.getElementById('view');
 
+function presc(e){return e.free?(e.reps||'livre'):`${e.sets} x ${e.reps||'—'}`}
+function isoOf(d){return new Date(d-d.getTimezoneOffset()*6e4).toISOString().slice(0,10)}
+function weekDates(){const t=new Date();t.setHours(12,0,0,0);const m=new Date(t);m.setDate(t.getDate()-todayIdx());return DAYS.map((_,i)=>{const d=new Date(m);d.setDate(m.getDate()+i);return isoOf(d)})}
+function checkinCard(pl){
+  const ti=todayIdx(),day=pl.week[ti],done=L().checkins[isoToday()];
+  const wk=weekDates().filter(d=>L().checkins[d]).length;
+  const planned=pl.week.filter(d=>d.cls).length;
+  const title=day.cls?day.text:'Dia de descanso';
+  return `<div class="card checkin"><div><div class="tag">Hoje · ${DAYS_FULL[ti]}</div><h3>${esc(title)}</h3><span class="muted">${wk} de ${planned} check-ins nesta semana · ${Object.keys(L().checkins).length} no total</span></div>
+  ${done?`<button type="button" class="done" id="uncheck" aria-label="Desfazer check-in de hoje">✓ Check-in feito</button>`:`<button type="button" class="primary" id="checkin">${day.cls?'Fazer check-in':'Check-in de treino extra'}</button>`}</div>`;
+}
 function renderPlano(){
   const p=P(),pl=buildPlan(p);
   const bmiTxt=pl.bmi<18.5?'abaixo do peso':pl.bmi<25?'saudável':pl.bmi<30?'sobrepeso':'obesidade';
@@ -297,12 +324,14 @@ function renderPlano(){
     <div class="stat"><div class="l">Calorias por dia</div><div class="v">${pl.kcal.toLocaleString('pt-BR')} <span>kcal</span></div><div class="l">${p.goal==='emagrecer'?'déficit de cerca de 500 kcal':p.goal==='ganhar'?'superávit de cerca de 300 kcal':'manutenção'}</div></div>
     <div class="stat"><div class="l">Proteína por dia</div><div class="v">${pl.prot} <span>g</span></div><div class="l">carbo ${pl.carb} g · gordura ${pl.fat} g · água ${fmt(pl.water)} L</div></div>
   </div>
+  ${checkinCard(pl)}
+  ${pl.custom?`<div class="status"><span>Usando o treino importado em ${brDate(pl.custom.importedAt)}.</span><button type="button" id="goPerfil">Trocar</button></div>`:''}
   ${pl.alerts.map(a=>`<div class="alert"><b>${esc(a[0])}</b><span>${esc(a[1])}</span></div>`).join('')}
-  <div><h2>Semana</h2><div class="week">${pl.week.map((d,i)=>`<div class="day ${d.cls} ${i===todayIdx()?'today':''}"><span class="d">${DAYS[i]}</span><span class="t">${esc(d.text)}</span></div>`).join('')}</div></div>
+  <div><h2>Semana</h2><div class="week">${pl.week.map((d,i)=>{const ck=L().checkins[weekDates()[i]];return `<div class="day ${d.cls} ${i===todayIdx()?'today':''} ${ck?'done':''}"><span class="d">${DAYS[i]}</span><span class="t">${esc(d.text)}</span>${ck?'<span class="ck">✓ feito</span>':''}</div>`}).join('')}</div></div>
   <div><h2>Treinos de musculação</h2>
     <p class="muted">${p.level==='iniciante'?'Nas 2 primeiras semanas, faça 2 séries com carga leve para aprender o movimento. ':''}Termine cada série sentindo que ainda faria mais 1 ou 2 repetições. Quando completar todas as séries com boa técnica, suba a carga de 2 a 5%. Descanse de 60 a 90 segundos entre séries.</p>
     <div class="cards">${pl.workouts.map(w=>`<div class="card"><div><div class="tag">Treino ${w.letter} · ${DAYS_FULL[w.day]}</div><h3>${esc(w.title)}</h3></div>
-      <table><thead><tr><th>Exercício</th><th class="n">Séries</th></tr></thead><tbody>${w.exercises.map(e=>`<tr><td>${esc(e.name)}${e.notes.map(n=>`<div class="note">${esc(n)}</div>`).join('')}</td><td class="n">${e.sets} x ${e.reps}</td></tr>`).join('')}</tbody></table></div>`).join('')}</div>
+      <table><thead><tr><th>Exercício</th><th class="n">Séries</th></tr></thead><tbody>${w.exercises.map(e=>`<tr><td>${esc(e.name)}${e.notes.map(n=>`<div class="note">${esc(n)}</div>`).join('')}</td><td class="n">${presc(e)}</td></tr>`).join('')}</tbody></table></div>`).join('')}</div>
   </div>
   <div><h2>Alimentação</h2>
     <table><thead><tr><th>Nutriente</th><th class="n">Por dia</th><th>De onde vem</th></tr></thead><tbody>
@@ -329,11 +358,12 @@ function renderTreino(){
   const w=pl.workouts.find(x=>x.id===trainSel);
   const sportToday=p.sport!=='nenhum'&&p.sportDays.includes(todayIdx());
   return `<section>
+  ${checkinCard(pl)}
   ${sportToday?`<div class="alert"><b>Hoje é dia de ${esc(SPORTS[p.sport])}</b><span>Aqueça de 5 a 10 minutos e beba água durante a aula.</span></div>`:''}
   <div class="row"><label for="wsel">Treino</label><select id="wsel">${pl.workouts.map(x=>`<option value="${x.id}" ${x.id===trainSel?'selected':''}>Treino ${x.letter} · ${DAYS_FULL[x.day]} · ${esc(x.title)}</option>`).join('')}</select>
   <label for="wdate">Data</label><input type="date" id="wdate" value="${isoToday()}"></div>
   <div class="card"><h3>Treino ${w.letter}: ${esc(w.title)}</h3>
-  <div>${w.exercises.map((e,i)=>{const last=lastLoads(e.key);return `<div class="ex"><div class="ex-head"><b>${esc(e.name)}</b><span class="muted">${e.sets} x ${e.reps}${last?` · última: ${esc(last)}`:''}</span></div>
+  <div>${w.exercises.map((e,i)=>{const last=lastLoads(e.key);return `<div class="ex"><div class="ex-head"><b>${esc(e.name)}</b><span class="muted">${presc(e)}${last?` · última: ${esc(last)}`:''}</span></div>
     ${e.notes.map(n=>`<div class="note">${esc(n)}</div>`).join('')}
     <div class="sets">${Array.from({length:e.sets},(_,s)=>e.load?`<input type="number" inputmode="decimal" min="0" step="0.5" id="s-${i}-${s}" placeholder="Série ${s+1} kg" aria-label="${esc(e.name)} série ${s+1} em kg">`:`<label class="chip"><input type="checkbox" id="s-${i}-${s}"> Série ${s+1}</label>`).join('')}</div></div>`}).join('')}</div>
   <div class="row"><button class="primary" id="saveW">Salvar treino</button></div></div>
@@ -380,7 +410,71 @@ function renderProgresso(){
   </section>`;
 }
 
-let confirmDel=false;
+let confirmDel=false,aiDraft=null,aiText='';
+const DAYWORDS=[['segunda','seg','monday','mon'],['terça','terca','ter','tuesday','tue'],['quarta','qua','wednesday','wed'],['quinta','qui','thursday','thu'],['sexta','sex','friday','fri'],['sábado','sabado','sáb','sab','saturday','sat'],['domingo','dom','sunday','sun']];
+const L_=String.raw`\p{L}`;
+function findDays(line){
+  const low=line.toLowerCase(),found=[];
+  DAYWORDS.forEach((ws,i)=>{if(ws.some((w,j)=>(j<2||w.length>3||low.length<40)&&new RegExp(`(?<!${L_})${w}(?!${L_})`,'u').test(low)))found.push(i)});
+  // "segunda a sexta"
+  const m=low.match(/(segunda|terça|terca|quarta|quinta|sexta|sábado|sabado)(?:-feira)?\s+(?:a|à|até)\s+(terça|terca|quarta|quinta|sexta|sábado|sabado|domingo)/u);
+  if(m){const a=DAYWORDS.findIndex(w=>w.includes(m[1])),b=DAYWORDS.findIndex(w=>w.includes(m[2]));for(let i=a;i<=b;i++)if(!found.includes(i))found.push(i)}
+  return found.sort();
+}
+const SETS_RE=/(\d+)\s*(?:x|×)\s*(\d+(?:\s*(?:-|–|a)\s*\d+)?\s*(?:segundos|seg|s|minutos|min|m|km|reps?|repetições)?(?!\p{L})|máx\p{L}*|max\p{L}*|falha)|(\d+)\s*séries?\s*(?:de\s*)?(\d+(?:\s*(?:-|–|a)\s*\d+)?\s*(?:segundos|seg|s|minutos|min|reps?|repetições)?)/iu;
+function cleanLine(l){return l.replace(/\*\*|__|`/g,'').replace(/^\s*(?:[#>*•·\-–—]+|\d+[.)]|[a-z][.)])\s*/iu,'').trim()}
+function parseAI(text){
+  const days={};let cur=[];
+  text.split(/\r?\n/).forEach(raw=>{
+    let line=raw.trim();if(!line||/^\|?\s*:?-{3,}/.test(line))return;
+    if(line.includes('|')){const cells=line.split('|').map(c=>c.trim()).filter(Boolean);if(/exerc[ií]cio|exercise/i.test(cells[0]||''))return;line=cells.join(' ')}
+    const c=cleanLine(line);if(!c)return;
+    const ds=findDays(c),hasSets=SETS_RE.test(c);
+    if(ds.length&&!hasSets&&c.length<90){
+      let title=c.replace(/-feira/giu,'');DAYWORDS.flat().forEach(w=>{title=title.replace(new RegExp(`(?<!${L_})${w}(?!${L_})`,'giu'),'')});
+      title=title.replace(/\b(e|a|à|até|dia|day)\b/giu,' ').replace(/^[\s:,\-–—()]+|[\s:,\-–—()]+$/gu,'').replace(/\s{2,}/g,' ').replace(/^\(|\)$/g,'');
+      title=title.replace(/\(\s*\)/g,'').replace(/^\d+\s*[:\-–]?\s*/u,'').replace(/^[\s:,\-–—]+/u,'').trim();
+      if(!title)title='Treino';title=title.charAt(0).toUpperCase()+title.slice(1);
+      cur=ds;ds.forEach(d=>{days[d]={title,exercises:[]}});return;
+    }
+    if(!cur.length)return;
+    const m=c.match(SETS_RE);let ex;
+    if(m){const name=c.slice(0,m.index).replace(/[\s:–—\-(,]+$/u,'').trim();const note=c.slice(m.index+m[0].length).replace(/^[\s,;:\-–—]+|[\s)]+$/gu,'').replace(/^\(/,'').trim();
+      if(!name)return;ex={name,sets:+(m[1]||m[3]),reps:(m[2]||m[4]||'').trim(),note};}
+    else{if(c.length>70||/^(obs|dica|nota|aqueciment|descanso entre|importante)/iu.test(c))return;
+      const t=c.match(/(\d+\s*(?:min|minutos|km|s|seg))\b/iu);ex={name:t?c.replace(t[0],'').replace(/[\s:–\-]+$/u,'').trim()||c:c,sets:null,reps:t?t[1]:'',note:''}}
+    cur.forEach(d=>days[d].exercises.push({...ex}));
+  });
+  return days;
+}
+function aiPrompt(p){
+  const days=[...new Set([...p.liftDays])].sort().map(i=>DAYS_FULL[i]).join(', ')||'a definir';
+  const sport=p.sport!=='nenhum'?` Também pratico ${SPORTS[p.sport]} em: ${p.sportDays.map(i=>DAYS_FULL[i]).join(', ')||'a definir'}.`:'';
+  const flags=p.flags.map(f=>FLAGS[f]).join('; ');
+  return `Monte meu treino semanal de musculação. Meus dados: ${p.sex==='f'?'mulher':'homem'}, ${p.age} anos, ${p.weight} kg, ${p.height} cm, ${p.level==='iniciante'?'iniciante':'já treino'}, objetivo: ${p.goal==='emagrecer'?'emagrecer':p.goal==='ganhar'?'ganhar massa':'manter o peso e ganhar força'}, treino ${p.place==='casa'?'em casa':'na academia'}. Dias de musculação: ${days}.${sport}${flags?' Cuidados: '+flags+'.':''}${p.notes?' Observações: '+p.notes+'.':''}
+
+Responda SOMENTE neste formato, sem tabelas, um bloco por dia da semana:
+
+Segunda: Nome do treino
+- Exercício 3x12
+- Exercício 4x10 (observação curta)
+- Prancha 3x30s
+
+Terça: Descanso
+
+Use sempre séries x repetições ou tempo (ex.: 3x12, 3x30s, 1x20min).`;
+}
+function aiCard(p){
+  const st=p.custom?(p.custom.active?`<div class="status"><span>Usando o treino importado em ${brDate(p.custom.importedAt)}.</span><button type="button" id="autoPlan">Voltar ao plano automático</button></div>`:`<div class="status"><span>Há um treino importado em ${brDate(p.custom.importedAt)} guardado.</span><button type="button" id="reuseAI">Usar de novo</button></div>`):'';
+  const prev=aiDraft?`<div class="card"><h3>Confira antes de usar</h3>${Object.keys(aiDraft).map(Number).sort((a,b)=>a-b).map(d=>`<div><div class="tag">${DAYS_FULL[d]}</div><b>${esc(aiDraft[d].title)}</b>${aiDraft[d].exercises.length?`<table><tbody>${aiDraft[d].exercises.map(e=>`<tr><td>${esc(e.name)}${e.note?`<div class="muted">${esc(e.note)}</div>`:''}</td><td class="n">${esc(presc({...e,free:!e.sets}))}</td></tr>`).join('')}</tbody></table>`:''}</div>`).join('')}
+    <div class="row"><button type="button" class="primary" id="applyAI">Usar este treino</button><button type="button" id="cancelAI">Cancelar</button></div></div>`:'';
+  return `<div class="card ai" id="aiBox"><h2>Treino de outra IA</h2>
+  <p class="muted">Use o treino do ChatGPT, Gemini ou outra IA. O app separa os exercícios em cada dia da semana e passa a usar esse treino no Plano e no Treino.</p>
+  ${st}
+  <div class="field"><label for="ai-prompt">1. Copie este pedido e cole na IA</label><textarea id="ai-prompt" rows="5" readonly>${esc(aiPrompt(p))}</textarea><div class="row"><button type="button" id="copyPrompt">Copiar pedido</button></div></div>
+  <div class="field"><label for="ai-text">2. Cole aqui a resposta da IA</label><textarea id="ai-text" rows="8" placeholder="Segunda: Pernas&#10;- Agachamento 3x12&#10;- Leg press 3x15&#10;&#10;Terça: Descanso">${esc(aiText)}</textarea><div class="row"><button type="button" class="primary" id="parseAI">Ler treino</button></div></div>
+  ${prev}</div>`;
+}
 function dayChips(name,sel){return `<div class="chips">${DAYS.map((d,i)=>`<label class="chip"><input type="checkbox" name="${name}" value="${i}" ${sel.includes(i)?'checked':''}> ${d}</label>`).join('')}</div>`}
 function renderPerfil(){
   const p=P();
@@ -403,7 +497,7 @@ function renderPerfil(){
   </div>
   <div class="row"><button class="primary" type="submit">Salvar perfil</button><button type="button" id="newP">Novo perfil</button>${S.profiles.length>1?`<button type="button" class="danger" id="delP">Excluir perfil</button>`:''}</div>
   ${confirmDel?`<div class="confirm"><span>Excluir ${esc(p.name)} e todos os registros?</span><button type="button" class="danger" id="delYes">Excluir</button><button type="button" id="delNo">Cancelar</button></div>`:''}
-  </form></section>`;
+  </form>${aiCard(p)}</section>`;
 }
 
 /* ---------- fotos e registros (IndexedDB, fica no aparelho) ---------- */
@@ -494,9 +588,23 @@ view.addEventListener('click',e=>{
     const pl=buildPlan(P()),w=pl.workouts.find(x=>x.id===trainSel);
     const entries=w.exercises.map((ex,i)=>({key:ex.key,name:ex.name,loads:Array.from({length:ex.sets},(_,s)=>{const el=document.getElementById(`s-${i}-${s}`);return ex.load?el.value:(el.checked?'ok':'')})}));
     if(!entries.some(en=>en.loads.some(v=>v!==''))){toast('Preencha pelo menos uma série');return}
-    L().workouts.push({date:document.getElementById('wdate').value||isoToday(),title:'Treino '+w.letter+': '+w.title,entries});
+    const wd=document.getElementById('wdate').value||isoToday();
+    L().workouts.push({date:wd,title:'Treino '+w.letter+': '+w.title,entries});L().checkins[wd]=L().checkins[wd]||'lift';
     save();toast('Treino salvo');render();
   }
+  if(id==='checkin'){const pl=buildPlan(P());L().checkins[isoToday()]=pl.week[todayIdx()].cls||'extra';save();toast('Check-in feito. Bom treino!');render()}
+  if(id==='uncheck'){delete L().checkins[isoToday()];save();toast('Check-in desfeito');render()}
+  if(id==='goPerfil'){tab='perfil';render();document.getElementById('aiBox').scrollIntoView()}
+  if(id==='copyPrompt'){const ta=document.getElementById('ai-prompt');const done=()=>toast('Pedido copiado. Cole na IA.');
+    try{navigator.clipboard.writeText(ta.value).then(done,()=>{ta.select();toast('Selecionei o texto. Copie com Ctrl+C ou segurando o dedo.')})}catch(_){ta.select();toast('Selecionei o texto. Copie com Ctrl+C ou segurando o dedo.')}}
+  if(id==='parseAI'){aiDraft=parseAI(document.getElementById('ai-text').value);aiText=document.getElementById('ai-text').value;
+    if(!Object.values(aiDraft).some(d=>d.exercises.length)){aiDraft=null;toast('Não achei dias da semana com exercícios. Use o pedido acima na IA.');return}render()}
+  if(id==='applyAI'){const p=P();p.custom={active:true,days:aiDraft,importedAt:isoToday()};
+    p.liftDays=Object.keys(aiDraft).map(Number).filter(d=>aiDraft[d].exercises.length);p.sportDays=p.sportDays.filter(d=>!p.liftDays.includes(d));
+    aiDraft=null;aiText='';trainSel=null;save();toast('Treino importado');tab='plano';render()}
+  if(id==='cancelAI'){aiDraft=null;render()}
+  if(id==='autoPlan'){P().custom.active=false;trainSel=null;save();toast('Voltou para o plano automático');render()}
+  if(id==='reuseAI'){P().custom.active=true;trainSel=null;save();toast('Treino importado reativado');render()}
   if(id==='addKg'){
     const kg=parseFloat(document.getElementById('wkKg').value),date=document.getElementById('wkDate').value||isoToday();
     if(!(kg>=30&&kg<=300)){toast('Digite um peso entre 30 e 300 kg');return}
