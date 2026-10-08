@@ -3,7 +3,8 @@
 // assim quem usa o app não precisa de chave nenhuma.
 
 const ALLOWED_ORIGINS = ['https://andrearanttes99.github.io'];
-const DEFAULT_MODEL = 'gemini-2.5-flash';
+// Tenta em ordem; se o Google aposentar um modelo (404), passa para o próximo
+const MODELS = ['gemini-3.8-flash', 'gemini-flash-latest', 'gemini-2.5-flash'];
 
 function cors(origin) {
   return {
@@ -46,16 +47,20 @@ export default {
       else contents.push(t);
     }
 
-    const model = env.MODEL || DEFAULT_MODEL;
-    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': env.GEMINI_KEY },
-      body: JSON.stringify({
-        systemInstruction: { parts: [{ text: rules }] },
-        contents,
-        generationConfig: { responseMimeType: 'application/json', temperature: 0.6 },
-      }),
+    const payload = JSON.stringify({
+      systemInstruction: { parts: [{ text: rules }] },
+      contents,
+      generationConfig: { responseMimeType: 'application/json', temperature: 0.6 },
     });
+    let res;
+    for (const model of [...new Set([env.MODEL, ...MODELS].filter(Boolean))]) {
+      res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-goog-api-key': env.GEMINI_KEY },
+        body: payload,
+      });
+      if (res.status !== 404) break;
+    }
     if (res.status === 429) return reply(429, { erro: 'limite' }, origin);
     if (!res.ok) {
       let detalhe = '';
