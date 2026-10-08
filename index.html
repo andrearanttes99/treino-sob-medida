@@ -45,7 +45,7 @@ button.primary{background:var(--accent);color:var(--accent-ink);border-color:var
 button.danger{color:var(--warn);border-color:var(--warn)}
 nav{display:flex;gap:4px;border-bottom:1px solid var(--line);margin-bottom:20px;overflow-x:auto;position:sticky;top:env(safe-area-inset-top,0px);background:var(--bg);z-index:2}
 nav button{border:0;border-bottom:3px solid transparent;border-radius:0;background:none;color:var(--muted);padding:10px 14px;font-family:var(--f-display);font-size:1.1rem;letter-spacing:.03em;text-transform:uppercase}
-@media (max-width:520px){nav button{padding:10px 9px;font-size:1rem}}
+@media (max-width:520px){nav{gap:0}nav button{padding:10px 7px;font-size:.95rem;letter-spacing:.01em}}
 nav button{white-space:nowrap}
 nav button[aria-selected="true"]{color:var(--ink);border-bottom-color:var(--accent)}
 section{display:grid;gap:24px;grid-template-columns:minmax(0,1fr)}
@@ -113,6 +113,17 @@ td.n,th.n{text-align:right;font-family:var(--f-mono);font-size:.85rem;white-spac
 .ai textarea{width:100%;font-size:.9rem}
 .ai textarea[readonly]{color:var(--muted);font-family:var(--f-mono);font-size:.78rem}
 .status{display:flex;flex-wrap:wrap;gap:8px;align-items:center;background:var(--accent-soft);padding:10px 12px;border-radius:8px}
+.chat{display:grid;gap:10px}
+.msg{max-width:88%;padding:10px 12px;border-radius:12px;white-space:pre-wrap;overflow-wrap:anywhere}
+.msg.me{justify-self:end;background:var(--accent);color:var(--accent-ink);border-bottom-right-radius:4px}
+.msg.bot{justify-self:start;background:var(--surface);border:1px solid var(--line);border-bottom-left-radius:4px}
+.msg.bot .plan{white-space:normal;margin-top:10px;display:grid;gap:8px}
+.msg.err{border-color:var(--warn);color:var(--warn)}
+.composer{display:grid;gap:8px;position:sticky;bottom:env(safe-area-inset-bottom,0px);background:var(--bg);padding-block:8px}
+.composer textarea{width:100%;resize:vertical}
+.sugs{display:flex;flex-wrap:wrap;gap:6px}
+.sugs button{font-weight:500;font-size:.85rem;border-radius:999px;padding:6px 12px}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
 footer{margin-top:32px;font-size:.82rem;color:var(--muted)}
 @media (prefers-reduced-motion:no-preference){nav button{transition:color .15s,border-color .15s}}
 </style>
@@ -132,6 +143,7 @@ footer{margin-top:32px;font-size:.82rem;color:var(--muted)}
     <button role="tab" data-tab="plano">Plano</button>
     <button role="tab" data-tab="treino">Treino</button>
     <button role="tab" data-tab="progresso">Progresso</button>
+    <button role="tab" data-tab="ia">IA</button>
     <button role="tab" data-tab="fotos">Fotos</button>
     <button role="tab" data-tab="perfil">Perfil</button>
   </nav>
@@ -466,7 +478,7 @@ Use sempre séries x repetições ou tempo (ex.: 3x12, 3x30s, 1x20min).`;
 }
 function aiCard(p){
   const st=p.custom?(p.custom.active?`<div class="status"><span>Usando o treino importado em ${brDate(p.custom.importedAt)}.</span><button type="button" id="autoPlan">Voltar ao plano automático</button></div>`:`<div class="status"><span>Há um treino importado em ${brDate(p.custom.importedAt)} guardado.</span><button type="button" id="reuseAI">Usar de novo</button></div>`):'';
-  const prev=aiDraft?`<div class="card"><h3>Confira antes de usar</h3>${Object.keys(aiDraft).map(Number).sort((a,b)=>a-b).map(d=>`<div><div class="tag">${DAYS_FULL[d]}</div><b>${esc(aiDraft[d].title)}</b>${aiDraft[d].exercises.length?`<table><tbody>${aiDraft[d].exercises.map(e=>`<tr><td>${esc(e.name)}${e.note?`<div class="muted">${esc(e.note)}</div>`:''}</td><td class="n">${esc(presc({...e,free:!e.sets}))}</td></tr>`).join('')}</tbody></table>`:''}</div>`).join('')}
+  const prev=aiDraft?`<div class="card"><h3>Confira antes de usar</h3>${planPreview(aiDraft)}
     <div class="row"><button type="button" class="primary" id="applyAI">Usar este treino</button><button type="button" id="cancelAI">Cancelar</button></div></div>`:'';
   return `<div class="card ai" id="aiBox"><h2>Treino de outra IA</h2>
   <p class="muted">Use o treino do ChatGPT, Gemini ou outra IA. O app separa os exercícios em cada dia da semana e passa a usar esse treino no Plano e no Treino.</p>
@@ -571,16 +583,99 @@ async function saveRecord(){
   pendingPhoto=null;toast('Registro salvo');render();
 }
 
+/* ---------- assistente com IA (usa o Claude de quem abre o app) ---------- */
+let sampleFn;let aiBusy=null;
+(async()=>{try{sampleFn=window.claude?await window.claude.use('sample'):null}catch(_){sampleFn=null}if(tab==='ia')render()})();
+function planPreview(days){return Object.keys(days).map(Number).sort((a,b)=>a-b).map(d=>`<div><div class="tag">${DAYS_FULL[d]}</div><b>${esc(days[d].title)}</b>${days[d].exercises.length?`<table><tbody>${days[d].exercises.map(e=>`<tr><td>${esc(e.name)}${e.note?`<div class="muted">${esc(e.note)}</div>`:''}</td><td class="n">${esc(presc({...e,free:!e.sets}))}</td></tr>`).join('')}</tbody></table>`:''}</div>`).join('')}
+const CHAT=()=>{S.chat=S.chat||{};return (S.chat[P().id]=S.chat[P().id]||[])};
+function planText(pl,p){
+  return DAYS_FULL.map((d,i)=>{const w=pl.workouts.find(x=>x.day===i);
+    if(w)return `${d}: ${w.title} — `+w.exercises.map(e=>`${e.name} ${presc(e)}`).join('; ');
+    return `${d}: ${pl.week[i].text}`}).join('\n');
+}
+function coachRules(){
+  const p=P(),pl=buildPlan(p),lg=L();
+  const ws=[...lg.weights].sort((a,b)=>a.date.localeCompare(b.date));
+  const recent=lg.workouts.slice(-5).map(w=>`${w.date}: ${w.title}`).join('; ')||'nenhum';
+  return `Você é o assistente de treino do app "Treino Sob Medida". Converse em português do Brasil, de forma direta e amigável. Hoje é ${DAYS_FULL[todayIdx()]}, ${brDate(isoToday())}.
+
+PERFIL DA PESSOA:
+Nome: ${p.name}. ${p.sex==='f'?'Mulher':'Homem'}, ${p.age} anos, ${p.weight} kg, ${p.height} cm. Experiência: ${p.level}. Objetivo: ${p.goal}. Treina ${p.place==='casa'?'em casa':'na academia'}.
+Dias de musculação: ${p.liftDays.map(i=>DAYS_FULL[i]).join(', ')||'nenhum'}. Esporte: ${SPORTS[p.sport]}${p.sport!=='nenhum'?' em '+(p.sportDays.map(i=>DAYS_FULL[i]).join(', ')||'dias a definir'):''}.
+Condições de saúde: ${p.flags.map(f=>FLAGS[f]).join('; ')||'nenhuma informada'}. Observações: ${p.notes||'nenhuma'}.
+Metas calculadas: ${pl.kcal} kcal e ${pl.prot} g de proteína por dia; meta de peso ${pl.target} kg. Peso mais recente: ${ws.length?ws[ws.length-1].kg+' kg em '+brDate(ws[ws.length-1].date):'sem registro'}.
+Treinos salvos recentes: ${recent}. Check-ins nesta semana: ${weekDates().filter(d=>lg.checkins[d]).length}.
+
+TREINO ATUAL (${pl.custom?'importado/personalizado':'gerado pelo app'}):
+${planText(pl,p)}
+
+REGRAS:
+- Respeite as condições de saúde: troque ou adapte exercícios de risco e lembre de liberação médica quando fizer sentido. Não dê diagnóstico.
+- Quando a pessoa pedir um treino novo ou mudanças no treino, devolva o treino COMPLETO da semana em "plan" (todos os dias com treino, e dias de descanso/esporte com exercises vazio). Se for só uma pergunta, "plan" é null.
+- Exercícios com séries e repetições ou tempo (ex.: sets 3, reps "10-12"; sets 3, reps "30 s"; sets 1, reps "20 min").
+- "reply" é a resposta curta para a pessoa (até 6 frases), sem markdown.
+
+Responda SOMENTE com JSON neste formato:
+{"reply":"texto","plan":null}
+ou
+{"reply":"texto","plan":{"days":{"0":{"title":"Pernas","exercises":[{"name":"Leg press","sets":3,"reps":"12","note":""}]},"1":{"title":"Descanso","exercises":[]}}}}
+As chaves de "days" são o dia da semana: 0=segunda, 1=terça, 2=quarta, 3=quinta, 4=sexta, 5=sábado, 6=domingo.`;
+}
+function normPlan(plan){
+  if(!plan||!plan.days||typeof plan.days!=='object')return null;
+  const days={};
+  Object.entries(plan.days).forEach(([k,d])=>{const i=Number(k);if(!(i>=0&&i<=6)||!d)return;
+    days[i]={title:String(d.title||'Treino').slice(0,60),exercises:(Array.isArray(d.exercises)?d.exercises:[]).slice(0,15).map(e=>({name:String(e.name||'').slice(0,80),sets:Number(e.sets)>0?Math.min(10,Math.round(Number(e.sets))):null,reps:String(e.reps??'').slice(0,20),note:String(e.note||'').slice(0,120)})).filter(e=>e.name)}});
+  return Object.values(days).some(d=>d.exercises.length)?days:null;
+}
+const SUGS=['Quero focar em glúteos e pernas, 4 vezes por semana','Monte um treino em casa de 30 minutos','Troque os exercícios que forçam o joelho','Estou cansado hoje, o que faço?','Quanto de proteína devo comer no café da manhã?'];
+function renderIA(){
+  const chat=CHAT();
+  if(sampleFn===null)return `<section><div class="card"><h2>Assistente de treino</h2><p>O assistente usa o Claude e funciona quando o app é aberto pelo link do Claude:</p><p style="overflow-wrap:anywhere"><b>https://claude.ai/artifact/GysbYRHhkazeSWHz4sgQZ8</b></p><p class="muted">Nesta versão, use o importador "Treino de outra IA" na aba Perfil para trazer um treino do ChatGPT ou do Gemini.</p><div class="row"><button type="button" id="goPerfil">Abrir importador</button></div></div></section>`;
+  const msgs=chat.map((m,i)=>m.role==='user'?`<div class="msg me">${esc(m.content)}</div>`:`<div class="msg bot ${m.err?'err':''}">${esc(m.content)}${m.plan?`<div class="plan">${planPreview(m.plan)}<div class="row">${m.applied?`<span class="muted">✓ Treino aplicado</span>`:`<button type="button" class="primary" data-apply="${i}">Usar este treino</button>`}</div></div>`:''}</div>`).join('');
+  return `<section>
+  <div><h2>Assistente de treino</h2><p class="muted">Peça do seu jeito: um treino novo, trocas de exercício, dúvidas de alimentação. O assistente conhece o perfil e o treino de ${esc(P().name)}. As respostas usam o Claude da sua conta.</p></div>
+  ${chat.length?'':`<div class="sugs">${SUGS.map(t=>`<button type="button" data-sug="${esc(t)}">${esc(t)}</button>`).join('')}</div>`}
+  <div class="chat" id="chat">${msgs}${aiBusy?`<div class="msg bot" id="thinking">Pensando...</div>`:''}</div>
+  <div class="composer"><label for="ia-in" class="sr">Sua mensagem</label><textarea id="ia-in" rows="3" placeholder="Ex.: quero treinar 3 vezes por semana com foco em braços e abdômen" ${aiBusy?'disabled':''}></textarea>
+  <div class="row">${aiBusy?`<button type="button" id="iaStop">Parar</button>`:`<button type="button" class="primary" id="iaSend">Enviar</button>`}${chat.length&&!aiBusy?`<button type="button" id="iaClear">Limpar conversa</button>`:''}</div></div>
+  </section>`;
+}
+async function sendIA(text){
+  text=(text||'').trim();if(!text||aiBusy||!sampleFn)return;
+  const chat=CHAT();chat.push({role:'user',content:text});
+  const turns=chat.filter(m=>!m.err).slice(-12).map(m=>({role:m.role,content:m.role==='assistant'&&m.plan?m.content+'\n(Plano proposto: '+Object.keys(m.plan).map(d=>DAYS_FULL[d]+' '+m.plan[d].title).join(', ')+')':m.content}));
+  while(turns.length&&turns[0].role!=='user')turns.shift();
+  aiBusy=new AbortController();render();scrollChat();
+  try{
+    const r=await sampleFn.json([{role:'user',content:coachRules()},...turns],{cache:false,signal:aiBusy.signal});
+    const reply=String(r&&r.reply||'Pronto.').slice(0,2000);
+    chat.push({role:'assistant',content:reply,plan:normPlan(r&&r.plan)});
+  }catch(e){
+    if(e&&e.code==='not_granted'||e&&e.code==='sampling_disabled'){chat.push({role:'assistant',err:1,content:'O assistente precisa da sua permissão para usar o Claude. Abra o app de novo e toque em Permitir.'})}
+    else if(e&&e.code==='cancelled'){chat.pop()}
+    else if(e&&e.code==='rate_limited'){chat.push({role:'assistant',err:1,content:'Muitas mensagens seguidas ou limite de uso atingido. Tente de novo daqui a pouco.'})}
+    else if(e&&e.code==='invalid_json'){chat.push({role:'assistant',err:1,content:'Não consegui montar a resposta. Tente pedir de outro jeito.'})}
+    else chat.push({role:'assistant',err:1,content:'Não consegui responder agora. Tente de novo.'});
+  }
+  aiBusy=null;if(chat.length>40)chat.splice(0,chat.length-40);save();if(tab==='ia'){render();scrollChat()}
+}
+function scrollChat(){const c=document.getElementById('thinking')||document.querySelector('#chat .msg:last-child');if(c)c.scrollIntoView({block:'nearest'})}
+function applyDays(days){const p=P();p.custom={active:true,days,importedAt:isoToday()};
+  p.liftDays=Object.keys(days).map(Number).filter(d=>days[d].exercises.length);p.sportDays=p.sportDays.filter(d=>!p.liftDays.includes(d));trainSel=null;save()}
+
 /* ---------- render e eventos ---------- */
 function render(){
   const sel=document.getElementById('profileSel');
   sel.innerHTML=S.profiles.map(p=>`<option value="${p.id}" ${p.id===S.active?'selected':''}>${esc(p.name)||'Sem nome'}</option>`).join('');
   document.querySelectorAll('nav button').forEach(b=>b.setAttribute('aria-selected',b.dataset.tab===tab));
   if(tab==='fotos'){view.innerHTML=renderFotosShell();fillFotos();return}
+  if(tab==='ia'){view.innerHTML=renderIA();return}
   view.innerHTML={plano:renderPlano,treino:renderTreino,progresso:renderProgresso,perfil:renderPerfil}[tab]();
 }
 document.querySelector('nav').addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;tab=b.dataset.tab;confirmDel=false;try{localStorage.setItem(KEY+'.tab',tab)}catch(_){}render()});
 document.getElementById('profileSel').addEventListener('change',e=>{S.active=e.target.value;trainSel=null;confirmRec=null;pendingPhoto=null;save();render()});
+view.addEventListener('keydown',e=>{if(e.target.id==='ia-in'&&e.key==='Enter'&&!e.shiftKey&&!e.isComposing){e.preventDefault();sendIA(e.target.value)}});
 view.addEventListener('change',e=>{if(e.target.id==='wsel'){trainSel=e.target.value;render()}});
 view.addEventListener('click',e=>{
   const id=e.target.id;
@@ -594,14 +689,17 @@ view.addEventListener('click',e=>{
   }
   if(id==='checkin'){const pl=buildPlan(P());L().checkins[isoToday()]=pl.week[todayIdx()].cls||'extra';save();toast('Check-in feito. Bom treino!');render()}
   if(id==='uncheck'){delete L().checkins[isoToday()];save();toast('Check-in desfeito');render()}
-  if(id==='goPerfil'){tab='perfil';render();document.getElementById('aiBox').scrollIntoView()}
+  if(id==='goPerfil'){tab='perfil';render();const b=document.getElementById('aiBox');if(b)b.scrollIntoView()}
   if(id==='copyPrompt'){const ta=document.getElementById('ai-prompt');const done=()=>toast('Pedido copiado. Cole na IA.');
     try{navigator.clipboard.writeText(ta.value).then(done,()=>{ta.select();toast('Selecionei o texto. Copie com Ctrl+C ou segurando o dedo.')})}catch(_){ta.select();toast('Selecionei o texto. Copie com Ctrl+C ou segurando o dedo.')}}
   if(id==='parseAI'){aiDraft=parseAI(document.getElementById('ai-text').value);aiText=document.getElementById('ai-text').value;
     if(!Object.values(aiDraft).some(d=>d.exercises.length)){aiDraft=null;toast('Não achei dias da semana com exercícios. Use o pedido acima na IA.');return}render()}
-  if(id==='applyAI'){const p=P();p.custom={active:true,days:aiDraft,importedAt:isoToday()};
-    p.liftDays=Object.keys(aiDraft).map(Number).filter(d=>aiDraft[d].exercises.length);p.sportDays=p.sportDays.filter(d=>!p.liftDays.includes(d));
-    aiDraft=null;aiText='';trainSel=null;save();toast('Treino importado');tab='plano';render()}
+  if(id==='applyAI'){applyDays(aiDraft);aiDraft=null;aiText='';toast('Treino importado');tab='plano';render()}
+  if(id==='iaSend'){sendIA(document.getElementById('ia-in').value)}
+  if(id==='iaStop'){aiBusy&&aiBusy.abort()}
+  if(id==='iaClear'){CHAT().length=0;save();render()}
+  if(e.target.dataset.sug){sendIA(e.target.dataset.sug)}
+  if(e.target.dataset.apply){const m=CHAT()[+e.target.dataset.apply];if(m&&m.plan){applyDays(m.plan);m.applied=1;save();toast('Treino aplicado. Veja na aba Plano.');render()}}
   if(id==='cancelAI'){aiDraft=null;render()}
   if(id==='autoPlan'){P().custom.active=false;trainSel=null;save();toast('Voltou para o plano automático');render()}
   if(id==='reuseAI'){P().custom.active=true;trainSel=null;save();toast('Treino importado reativado');render()}
