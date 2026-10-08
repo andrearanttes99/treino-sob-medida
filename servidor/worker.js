@@ -3,8 +3,9 @@
 // assim quem usa o app não precisa de chave nenhuma.
 
 const ALLOWED_ORIGINS = ['https://andrearanttes99.github.io'];
-// Tenta em ordem; se o Google aposentar um modelo (404), passa para o próximo
-const MODELS = ['gemini-3.8-flash', 'gemini-flash-latest', 'gemini-2.5-flash'];
+// Tenta em ordem; se um modelo estiver aposentado, lotado ou no limite, passa para o próximo
+const MODELS = ['gemini-3.8-flash', 'gemini-flash-latest', 'gemini-flash-lite-latest', 'gemini-2.5-flash'];
+const NEXT_ON = [404, 429, 500, 503];
 
 function cors(origin) {
   return {
@@ -59,7 +60,7 @@ export default {
         headers: { 'Content-Type': 'application/json', 'x-goog-api-key': env.GEMINI_KEY },
         body: payload,
       });
-      if (res.status !== 404) break;
+      if (!NEXT_ON.includes(res.status)) break;
     }
     if (res.status === 429) return reply(429, { erro: 'limite' }, origin);
     if (!res.ok) {
