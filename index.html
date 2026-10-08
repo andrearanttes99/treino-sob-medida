@@ -631,10 +631,12 @@ function normPlan(plan){
 const SUGS=['Quero focar em glúteos e pernas, 4 vezes por semana','Monte um treino em casa de 30 minutos','Troque os exercícios que forçam o joelho','Estou cansado hoje, o que faço?','Quanto de proteína devo comer no café da manhã?'];
 function renderIA(){
   const chat=CHAT();
-  if(sampleFn===null)return `<section><div class="card"><h2>Assistente de treino</h2><p>O assistente usa o Claude e funciona quando o app é aberto pelo link do Claude:</p><p style="overflow-wrap:anywhere"><b>https://claude.ai/artifact/GysbYRHhkazeSWHz4sgQZ8</b></p><p class="muted">Nesta versão, use o importador "Treino de outra IA" na aba Perfil para trazer um treino do ChatGPT ou do Gemini.</p><div class="row"><button type="button" id="goPerfil">Abrir importador</button></div></div></section>`;
+  const ext=extCfg();
+  if(sampleFn===null&&(!ext.key||iaSetup))return renderExtSetup(ext);
+  if(sampleFn===undefined&&!ext.key)return `<section><p class="muted">Carregando assistente...</p></section>`;
   const msgs=chat.map((m,i)=>m.role==='user'?`<div class="msg me">${esc(m.content)}</div>`:`<div class="msg bot ${m.err?'err':''}">${esc(m.content)}${m.plan?`<div class="plan">${planPreview(m.plan)}<div class="row">${m.applied?`<span class="muted">✓ Treino aplicado</span>`:`<button type="button" class="primary" data-apply="${i}">Usar este treino</button>`}</div></div>`:''}</div>`).join('');
   return `<section>
-  <div><h2>Assistente de treino</h2><p class="muted">Peça do seu jeito: um treino novo, trocas de exercício, dúvidas de alimentação. O assistente conhece o perfil e o treino de ${esc(P().name)}. As respostas usam o Claude da sua conta.</p></div>
+  <div><h2>Assistente de treino</h2><p class="muted">Peça do seu jeito: um treino novo, trocas de exercício, dúvidas de alimentação. O assistente conhece o perfil e o treino de ${esc(P().name)}. ${sampleFn?'As respostas usam o Claude da sua conta.':`As respostas usam o ${PROVIDERS[ext.provider].name} com a sua chave. <button type="button" id="iaSetupBtn">Trocar IA</button>`}</p></div>
   ${chat.length?'':`<div class="sugs">${SUGS.map(t=>`<button type="button" data-sug="${esc(t)}">${esc(t)}</button>`).join('')}</div>`}
   <div class="chat" id="chat">${msgs}${aiBusy?`<div class="msg bot" id="thinking">Pensando...</div>`:''}</div>
   <div class="composer"><label for="ia-in" class="sr">Sua mensagem</label><textarea id="ia-in" rows="3" placeholder="Ex.: quero treinar 3 vezes por semana com foco em braços e abdômen" ${aiBusy?'disabled':''}></textarea>
@@ -642,18 +644,19 @@ function renderIA(){
   </section>`;
 }
 async function sendIA(text){
-  text=(text||'').trim();if(!text||aiBusy||!sampleFn)return;
+  text=(text||'').trim();if(!text||aiBusy||!(sampleFn||extCfg().key))return;
   const chat=CHAT();chat.push({role:'user',content:text});
   const turns=chat.filter(m=>!m.err).slice(-12).map(m=>({role:m.role,content:m.role==='assistant'&&m.plan?m.content+'\n(Plano proposto: '+Object.keys(m.plan).map(d=>DAYS_FULL[d]+' '+m.plan[d].title).join(', ')+')':m.content}));
   while(turns.length&&turns[0].role!=='user')turns.shift();
   aiBusy=new AbortController();render();scrollChat();
   try{
-    const r=await sampleFn.json([{role:'user',content:coachRules()},...turns],{cache:false,signal:aiBusy.signal});
+    const r=sampleFn?await sampleFn.json([{role:'user',content:coachRules()},...turns],{cache:false,signal:aiBusy.signal}):await askExternal(coachRules(),turns,aiBusy.signal);
     const reply=String(r&&r.reply||'Pronto.').slice(0,2000);
     chat.push({role:'assistant',content:reply,plan:normPlan(r&&r.plan)});
   }catch(e){
-    if(e&&e.code==='not_granted'||e&&e.code==='sampling_disabled'){chat.push({role:'assistant',err:1,content:'O assistente precisa da sua permissão para usar o Claude. Abra o app de novo e toque em Permitir.'})}
-    else if(e&&e.code==='cancelled'){chat.pop()}
+    if(e&&e.ext){chat.push({role:'assistant',err:1,content:e.ext})}
+    else if(e&&e.code==='not_granted'||e&&e.code==='sampling_disabled'){chat.push({role:'assistant',err:1,content:'O assistente precisa da sua permissão para usar o Claude. Abra o app de novo e toque em Permitir.'})}
+    else if(e&&(e.code==='cancelled'||e.name==='AbortError')){chat.pop()}
     else if(e&&e.code==='rate_limited'){chat.push({role:'assistant',err:1,content:'Muitas mensagens seguidas ou limite de uso atingido. Tente de novo daqui a pouco.'})}
     else if(e&&e.code==='invalid_json'){chat.push({role:'assistant',err:1,content:'Não consegui montar a resposta. Tente pedir de outro jeito.'})}
     else chat.push({role:'assistant',err:1,content:'Não consegui responder agora. Tente de novo.'});
@@ -663,6 +666,55 @@ async function sendIA(text){
 function scrollChat(){const c=document.getElementById('thinking')||document.querySelector('#chat .msg:last-child');if(c)c.scrollIntoView({block:'nearest'})}
 function applyDays(days){const p=P();p.custom={active:true,days,importedAt:isoToday()};
   p.liftDays=Object.keys(days).map(Number).filter(d=>days[d].exercises.length);p.sportDays=p.sportDays.filter(d=>!p.liftDays.includes(d));trainSel=null;save()}
+
+/* ---------- Gemini e ChatGPT com a chave da própria pessoa (fica só neste aparelho) ---------- */
+const PROVIDERS={
+  gemini:{name:'Gemini',model:'gemini-2.5-flash',keyUrl:'https://aistudio.google.com/apikey',help:'Gratuito para uso pessoal, com limite diário. Crie a chave com sua conta Google.'},
+  openai:{name:'ChatGPT',model:'gpt-4o-mini',keyUrl:'https://platform.openai.com/api-keys',help:'Pago por uso (centavos por conversa). Precisa adicionar crédito na conta da OpenAI.'}
+};
+const EXT_KEY=KEY+'.ia';let iaSetup=false;
+function extCfg(){try{const c=JSON.parse(localStorage.getItem(EXT_KEY));if(c&&PROVIDERS[c.provider])return c}catch(_){}return {provider:'gemini',key:'',model:''}}
+function saveExt(c){try{localStorage.setItem(EXT_KEY,JSON.stringify(c))}catch(_){toast('Não consegui salvar a chave neste navegador')}}
+function renderExtSetup(c){
+  const pv=PROVIDERS[c.provider];
+  return `<section><form class="card" id="extForm"><h2>Conectar uma IA</h2>
+  <p>${sampleFn===null?'Nesta versão do app, o assistente funciona com o Gemini ou o ChatGPT usando a sua chave de acesso. ':''}A chave fica salva só neste aparelho e vai direto para a IA escolhida.</p>
+  <div class="form">
+    <div class="field"><label for="ext-prov">IA</label><select id="ext-prov">${Object.entries(PROVIDERS).map(([k,v])=>`<option value="${k}" ${k===c.provider?'selected':''}>${v.name}</option>`).join('')}</select></div>
+    <div class="field"><label for="ext-model">Modelo</label><input id="ext-model" value="${esc(c.model||pv.model)}" autocomplete="off"></div>
+    <div class="field wide"><label for="ext-key">Chave de API</label><input id="ext-key" type="password" value="${esc(c.key)}" placeholder="Cole aqui a chave" autocomplete="off"></div>
+  </div>
+  <p class="muted">${pv.help} Crie a chave em <b style="overflow-wrap:anywhere">${pv.keyUrl}</b>. Não compartilhe a chave com ninguém.</p>
+  <div class="row"><button class="primary" type="submit">Salvar e conversar</button>${c.key?`<button type="button" id="extRemove" class="danger">Remover chave</button>`:''}${c.key?`<button type="button" id="extBack">Voltar</button>`:''}</div>
+  </form>
+  <div class="card"><h3>Sem chave?</h3><p class="muted">Use o importador: peça o treino no app do ChatGPT ou do Gemini e cole a resposta.</p><div class="row"><button type="button" id="goPerfil">Abrir importador</button></div></div></section>`;
+}
+async function askExternal(rules,turns,signal){
+  const c=extCfg(),pv=PROVIDERS[c.provider],model=(c.model||pv.model).trim();
+  const merged=[];turns.forEach(t=>{const l=merged[merged.length-1];if(l&&l.role===t.role)l.content+='\n\n'+t.content;else merged.push({...t})});
+  let res,body;
+  try{
+    if(c.provider==='gemini'){
+      res=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,{method:'POST',signal,headers:{'Content-Type':'application/json','x-goog-api-key':c.key},
+        body:JSON.stringify({systemInstruction:{parts:[{text:rules}]},contents:merged.map(t=>({role:t.role==='assistant'?'model':'user',parts:[{text:t.content}]})),generationConfig:{responseMimeType:'application/json',temperature:0.6}})});
+    }else{
+      res=await fetch('https://api.openai.com/v1/chat/completions',{method:'POST',signal,headers:{'Content-Type':'application/json','Authorization':'Bearer '+c.key},
+        body:JSON.stringify({model,messages:[{role:'system',content:rules},...merged],response_format:{type:'json_object'},temperature:0.6})});
+    }
+  }catch(e){if(e.name==='AbortError')throw e;throw {ext:`Não consegui falar com o ${pv.name}. Confira a internet e tente de novo.`}}
+  try{body=await res.json()}catch(_){body=null}
+  if(!res.ok){
+    if(res.status===400&&/model/i.test(JSON.stringify(body||'')))throw {ext:`O modelo "${model}" não foi aceito pelo ${pv.name}. Toque em Trocar IA e confira o nome do modelo.`};
+    if(res.status===400||res.status===401||res.status===403)throw {ext:`A chave do ${pv.name} foi recusada. Toque em Trocar IA e cole a chave de novo.`};
+    if(res.status===429)throw {ext:c.provider==='openai'?'Limite ou crédito da OpenAI esgotado. Confira o saldo da sua conta.':'Limite gratuito do Gemini atingido. Espere um pouco e tente de novo.'};
+    if(res.status===404)throw {ext:`O modelo "${model}" não existe no ${pv.name}. Toque em Trocar IA e confira o nome.`};
+    throw {ext:`O ${pv.name} respondeu com erro (${res.status}). Tente de novo.`};
+  }
+  const text=c.provider==='gemini'?(body?.candidates?.[0]?.content?.parts||[]).map(x=>x.text||'').join(''):body?.choices?.[0]?.message?.content;
+  if(!text)throw {ext:`O ${pv.name} não devolveu resposta. Tente pedir de outro jeito.`};
+  const m=text.match(/\{[\s\S]*\}/);
+  try{return JSON.parse(m?m[0]:text)}catch(_){return {reply:text.slice(0,2000),plan:null}}
+}
 
 /* ---------- render e eventos ---------- */
 function render(){
@@ -676,7 +728,7 @@ function render(){
 document.querySelector('nav').addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;tab=b.dataset.tab;confirmDel=false;try{localStorage.setItem(KEY+'.tab',tab)}catch(_){}render()});
 document.getElementById('profileSel').addEventListener('change',e=>{S.active=e.target.value;trainSel=null;confirmRec=null;pendingPhoto=null;save();render()});
 view.addEventListener('keydown',e=>{if(e.target.id==='ia-in'&&e.key==='Enter'&&!e.shiftKey&&!e.isComposing){e.preventDefault();sendIA(e.target.value)}});
-view.addEventListener('change',e=>{if(e.target.id==='wsel'){trainSel=e.target.value;render()}});
+view.addEventListener('change',e=>{if(e.target.id==='ext-prov'){const k=document.getElementById('ext-key').value;const c={provider:e.target.value,key:k,model:PROVIDERS[e.target.value].model};view.innerHTML=renderExtSetup(c);return}if(e.target.id==='wsel'){trainSel=e.target.value;render()}});
 view.addEventListener('click',e=>{
   const id=e.target.id;
   if(id==='saveW'){
@@ -695,6 +747,9 @@ view.addEventListener('click',e=>{
   if(id==='parseAI'){aiDraft=parseAI(document.getElementById('ai-text').value);aiText=document.getElementById('ai-text').value;
     if(!Object.values(aiDraft).some(d=>d.exercises.length)){aiDraft=null;toast('Não achei dias da semana com exercícios. Use o pedido acima na IA.');return}render()}
   if(id==='applyAI'){applyDays(aiDraft);aiDraft=null;aiText='';toast('Treino importado');tab='plano';render()}
+  if(id==='iaSetupBtn'){iaSetup=true;render()}
+  if(id==='extBack'){iaSetup=false;render()}
+  if(id==='extRemove'){saveExt({provider:extCfg().provider,key:'',model:''});iaSetup=false;toast('Chave removida');render()}
   if(id==='iaSend'){sendIA(document.getElementById('ia-in').value)}
   if(id==='iaStop'){aiBusy&&aiBusy.abort()}
   if(id==='iaClear'){CHAT().length=0;save();render()}
@@ -719,7 +774,8 @@ view.addEventListener('click',e=>{
   if(id==='delYes'){const pid=P().id;S.profiles=S.profiles.filter(p=>p.id!==pid);delete S.logs[pid];S.active=S.profiles[0].id;confirmDel=false;save();toast('Perfil excluído');render()}
 });
 view.addEventListener('submit',e=>{
-  e.preventDefault();if(e.target.id==='recForm'){saveRecord();return}const p=P(),v=id=>document.getElementById(id).value;
+  e.preventDefault();if(e.target.id==='extForm'){const key=document.getElementById('ext-key').value.trim();if(!key){toast('Cole a chave de API');return}
+    saveExt({provider:document.getElementById('ext-prov').value,key,model:document.getElementById('ext-model').value.trim()});iaSetup=false;toast('IA conectada');render();return}if(e.target.id==='recForm'){saveRecord();return}const p=P(),v=id=>document.getElementById(id).value;
   const checked=n=>[...view.querySelectorAll(`input[name="${n}"]:checked`)].map(i=>i.value);
   const name=v('f-name').trim();if(!name){toast('Digite um nome');return}
   const num=(id,min,max,def)=>{const n=parseFloat(v(id));return n>=min&&n<=max?n:def};
