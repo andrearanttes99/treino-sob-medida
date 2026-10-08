@@ -57,7 +57,11 @@ export default {
       }),
     });
     if (res.status === 429) return reply(429, { erro: 'limite' }, origin);
-    if (!res.ok) return reply(502, { erro: 'gemini', status: res.status }, origin);
+    if (!res.ok) {
+      let detalhe = '';
+      try { detalhe = String((await res.json())?.error?.message || '').slice(0, 300); } catch {}
+      return reply(502, { erro: 'gemini', status: res.status, detalhe }, origin);
+    }
     const body = await res.json();
     const text = (body?.candidates?.[0]?.content?.parts || []).map(p => p.text || '').join('');
     if (!text) return reply(502, { erro: 'vazio_gemini' }, origin);

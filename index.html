@@ -713,7 +713,11 @@ async function askExternal(rules,turns,signal){
     catch(e){if(e.name==='AbortError')throw e;throw {ext:'Não consegui falar com o assistente. Confira a internet e tente de novo.'}}
     try{body=await res.json()}catch(_){body=null}
     if(res.status===429)throw {ext:'O assistente atingiu o limite de uso por agora. Tente de novo mais tarde.'};
-    if(!res.ok||!body||!body.text)throw {ext:'O assistente não conseguiu responder agora. Tente de novo.'};
+    if(!res.ok||!body||!body.text){
+      const e=(body&&body.erro)||'',det=[res.status,e,body&&body.status,body&&body.detalhe].filter(Boolean).join(' · ');
+      const msg=e==='sem_chave'?'O servidor do assistente está sem a chave configurada.':e==='origem'?'O servidor recusou este endereço do app.':'O assistente não conseguiu responder agora. Tente de novo.';
+      throw {ext:msg+(det?` (código: ${det})`:'')};
+    }
     const m=body.text.match(/\{[\s\S]*\}/);
     try{return JSON.parse(m?m[0]:body.text)}catch(_){return {reply:body.text.slice(0,2000),plan:null}}
   }
