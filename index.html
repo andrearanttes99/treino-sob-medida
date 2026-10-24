@@ -58,6 +58,7 @@ input:focus-visible,select:focus-visible,textarea:focus-visible,button:focus-vis
 button{font:inherit;font-weight:600;border-radius:8px;border:1px solid var(--line);background:var(--surface);color:var(--ink);padding:8px 14px;cursor:pointer}
 button.primary{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
 button.danger{color:var(--warn);border-color:var(--warn)}
+label.btn{font-size:1rem;text-transform:none;letter-spacing:normal;font-weight:600;border-radius:8px;border:1px solid var(--line);background:var(--surface);color:var(--ink);padding:8px 14px;cursor:pointer}
 nav{display:flex;gap:4px;border-bottom:1px solid var(--line);margin-bottom:20px;overflow-x:auto;position:sticky;top:env(safe-area-inset-top,0px);background:var(--bg);z-index:2}
 nav button{border:0;border-bottom:3px solid transparent;border-radius:0;background:none;color:var(--muted);padding:10px 14px;font-family:var(--f-display);font-size:1.1rem;letter-spacing:.03em;text-transform:uppercase}
 @media (max-width:520px){nav{gap:0}nav button{padding:10px 7px;font-size:.95rem;letter-spacing:.01em}}
@@ -99,6 +100,7 @@ td.n,th.n{text-align:right;font-family:var(--f-mono);font-size:.85rem;white-spac
 .chip{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);border-radius:999px;padding:4px 12px;background:var(--surface);font-size:.9rem;text-transform:none;letter-spacing:0;color:var(--ink);font-weight:500;cursor:pointer}
 .chip input{margin:0;accent-color:var(--accent)}
 .row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.code{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:1.1rem;letter-spacing:.06em}
 .ex{display:grid;gap:8px;padding:12px 0;border-bottom:1px solid var(--line)}
 .ex:last-child{border-bottom:0}
 .ex-head{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap}
@@ -162,7 +164,7 @@ footer{margin-top:32px;font-size:.82rem;color:var(--muted)}
     <button role="tab" data-tab="perfil">Perfil</button>
   </nav>
   <main id="view"></main>
-  <footer>Estimativas gerais a partir de fórmulas padrão (IMC, Mifflin-St Jeor). Não substituem médico, nutricionista ou professor de educação física. Os dados e as fotos ficam salvos só neste aparelho.</footer>
+  <footer>Estimativas gerais a partir de fórmulas padrão (IMC, Mifflin-St Jeor). Não substituem médico, nutricionista ou professor de educação física. Os dados e as fotos ficam no aparelho; faça backup na aba Perfil.</footer>
 </div>
 <div class="toast" id="toast" hidden></div>
 
@@ -227,7 +229,14 @@ function seed(){
 let S;
 try{S=JSON.parse(localStorage.getItem(KEY))}catch(e){S=null}
 if(!S||!S.profiles||!S.profiles.length)S=seed();
-function save(){try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){}}
+const snapOf=pid=>JSON.stringify([S.profiles.find(p=>p.id===pid),S.logs[pid],(S.chat||{})[pid]]);
+let snaps={};const takeSnaps=()=>{snaps={};S.profiles.forEach(p=>snaps[p.id]=snapOf(p.id))};takeSnaps();
+function save(){
+  S.meta=S.meta||{};const now=Date.now();
+  S.profiles.forEach(p=>{const sn=snapOf(p.id);if(sn!==snaps[p.id]){S.meta[p.id]=now;snaps[p.id]=sn}});
+  try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){toast('Não consegui salvar neste aparelho')}
+  if(typeof Sync!=='undefined')Sync.later();
+}
 const P=()=>S.profiles.find(p=>p.id===S.active)||S.profiles[0];
 const L=()=>{const l=(S.logs[P().id]=S.logs[P().id]||{weights:[],workouts:[]});l.checkins=l.checkins||{};return l};
 
@@ -523,7 +532,7 @@ function renderPerfil(){
   </div>
   <div class="row"><button class="primary" type="submit">Salvar perfil</button><button type="button" id="newP">Novo perfil</button>${S.profiles.length>1?`<button type="button" class="danger" id="delP">Excluir perfil</button>`:''}</div>
   ${confirmDel?`<div class="confirm"><span>Excluir ${esc(p.name)} e todos os registros?</span><button type="button" class="danger" id="delYes">Excluir</button><button type="button" id="delNo">Cancelar</button></div>`:''}
-  </form></section>`;
+  </form>${renderBackup()}</section>`;
 }
 
 /* ---------- fotos e registros (IndexedDB, fica no aparelho) ---------- */
@@ -585,14 +594,14 @@ view.addEventListener('click',async e=>{
   const t=e.target;
   if(t.dataset.del){confirmRec=t.dataset.del;fillFotos()}
   if(t.dataset.delno){confirmRec=null;fillFotos()}
-  if(t.dataset.delyes){await DB.del(t.dataset.delyes);confirmRec=null;toast('Registro excluído');fillFotos()}
+  if(t.dataset.delyes){await DB.del(t.dataset.delyes);(S.recGone=S.recGone||{})[t.dataset.delyes]=Date.now();Sync.recDirty=true;save();confirmRec=null;toast('Registro excluído');fillFotos()}
 });
 async function saveRecord(){
   const v=id=>document.getElementById(id).value, n=id=>{const x=parseFloat(v(id));return isNaN(x)?null:x};
   const rec={id:'r'+Date.now().toString(36),pid:P().id,date:v('r-date')||isoToday(),pose:v('r-pose'),photo:pendingPhoto,kg:n('r-kg'),waist:n('r-waist'),arm:n('r-arm'),note:v('r-note').trim()};
   if(!rec.photo&&rec.kg===null&&rec.waist===null&&rec.arm===null&&!rec.note){toast('Adicione uma foto, medida ou anotação');return}
   if(rec.kg!==null&&(rec.kg<30||rec.kg>300)){toast('Digite um peso entre 30 e 300 kg');return}
-  await dbReady;await DB.put(rec);
+  await dbReady;await DB.put(rec);Sync.recDirty=true;save();
   if(rec.kg!==null){const lg=L();lg.weights=lg.weights.filter(w=>w.date!==rec.date);lg.weights.push({date:rec.date,kg:rec.kg});P().weight=rec.kg;save()}
   pendingPhoto=null;toast('Registro salvo');render();
 }
@@ -796,6 +805,99 @@ function squarePhoto(file){return new Promise((res,rej)=>{const url=URL.createOb
     c.getContext('2d').drawImage(img,(img.width-m)/2,(img.height-m)/2,m,m,0,0,256,256);URL.revokeObjectURL(url);res(c.toDataURL('image/jpeg',0.82))};
   img.onerror=()=>{URL.revokeObjectURL(url);rej()};img.src=url})}
 
+
+/* ---------- backup e sincronização ---------- */
+// Na versão do GitHub os dados vão para o servidor (Cloudflare KV) com um código.
+// O mesmo código em outro aparelho junta os dados. Em qualquer versão dá para baixar um arquivo de backup.
+const SYNC_KEY=KEY+'.sync';
+var Sync={code:'',state:'',last:0,fotosTs:0,timer:null,recDirty:false,busy:false,
+  init(){try{const c=JSON.parse(localStorage.getItem(SYNC_KEY));if(c){this.code=c.code||'';this.last=c.last||0;this.fotosTs=c.fotosTs||0;this.recDirty=!!c.recDirty}}catch(_){}},
+  keep(){try{localStorage.setItem(SYNC_KEY,JSON.stringify({code:this.code,last:this.last,fotosTs:this.fotosTs,recDirty:this.recDirty}))}catch(_){}},
+  on(){return !!APP_SERVER},
+  async call(body){
+    const res=await fetch(APP_SERVER.replace(/\/?$/,'/dados'),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    let b=null;try{b=await res.json()}catch(_){}
+    if(!res.ok)throw new Error((b&&b.erro)||('http'+res.status));return b;
+  },
+  newCode(){const a='ABCDEFGHJKLMNPQRSTUVWXYZ23456789',r=crypto.getRandomValues(new Uint8Array(12));return [...r].map(x=>a[x%a.length]).join('')},
+  later(){if(!this.on()||!this.code)return;clearTimeout(this.timer);this.timer=setTimeout(()=>this.run(),1500)},
+  // baixa o que está na nuvem, junta com o aparelho e devolve o resultado
+  async run(code){
+    if(!this.on())return;if(this.busy){this.later();return}
+    this.busy=true;const c=code||this.code||this.newCode();
+    try{
+      const got=await this.call({acao:'ler',codigo:c});
+      if(code&&!got.dados){throw new Error('codigo')}
+      let fotos=null;
+      if(got.fotosTs&&got.fotosTs!==this.fotosTs)fotos=(await this.call({acao:'ler_fotos',codigo:c})).fotos;
+      if(got.dados)await mergeAll(got.dados,fotos);
+      const send=!got.dados||!!code||this.recDirty;
+      const put=await this.call({acao:'salvar',codigo:c,dados:packData(),fotos:send?await allRecords():null});
+      this.code=c;this.recDirty=false;this.fotosTs=put.fotosTs||got.fotosTs||0;this.last=Date.now();this.state='ok';this.keep();
+    }catch(e){this.state=e.message==='codigo'?'codigo':e.message==='sem_kv'?'sem_kv':'erro';if(code){this.busy=false;throw e}}
+    this.busy=false;const a=document.activeElement;if(tab==='perfil'&&!(a&&/^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)))render();
+  }
+};
+function packData(){const d=JSON.parse(JSON.stringify(S));delete d.active;return d}
+function allRecords(){return dbReady.then(()=>new Promise(res=>{if(!DB.db)return res(DB.mem.slice());try{const q=DB.db.transaction('entries').objectStore('entries').getAll();q.onsuccess=()=>res(q.result);q.onerror=()=>res([])}catch(_){res([])}}))}
+// Junta dados de outro aparelho ou de um arquivo: por pessoa, vale a versão alterada por último
+async function mergeAll(R,fotos){
+  if(!R||!Array.isArray(R.profiles))return;
+  const lm=S.meta||{},rm=R.meta||{},gone={...(R.gone||{})};Object.entries(S.gone||{}).forEach(([k,v])=>gone[k]=Math.max(v,gone[k]||0));
+  const ids=[...new Set([...S.profiles.map(p=>p.id),...R.profiles.map(p=>p.id)])];
+  const out={profiles:[],logs:{},chat:{},meta:{}};
+  for(const id of ids){
+    const lp=S.profiles.find(p=>p.id===id),rp=R.profiles.find(p=>p.id===id);
+    const lt=lp?(lm[id]||0):-1,rt=rp?(rm[id]||0):-1,useR=rt>lt,t=Math.max(lt,rt);
+    if(gone[id]&&gone[id]>=t)continue;
+    const src=useR?R:S;out.profiles.push(useR?rp:lp);out.logs[id]=(src.logs||{})[id]||{weights:[],workouts:[]};
+    if((src.chat||{})[id])out.chat[id]=src.chat[id];out.meta[id]=t;
+  }
+  if(!out.profiles.length)return;
+  const recGone={...(R.recGone||{})};Object.entries(S.recGone||{}).forEach(([k,v])=>recGone[k]=Math.max(v,recGone[k]||0));
+  Object.assign(S,out,{gone,recGone});if(!S.profiles.some(p=>p.id===S.active))S.active=S.profiles[0].id;
+  if(Array.isArray(fotos)){await dbReady;const have=new Set((await allRecords()).map(e=>e.id));
+    for(const e of fotos)if(e&&e.id&&!have.has(e.id)&&!recGone[e.id]){await DB.put(e);Sync.recDirty=true}}
+  await dbReady;for(const id of Object.keys(recGone))await DB.del(id);
+  takeSnaps();try{localStorage.setItem(KEY,JSON.stringify(S))}catch(_){}
+}
+const fmtCode=c=>c.replace(/(.{4})(?=.)/g,'$1-');
+function renderBackup(){
+  const n=S.profiles.length;
+  let cloud='';
+  if(Sync.on()){
+    const when=Sync.last?new Date(Sync.last).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}):'';
+    cloud=Sync.state==='sem_kv'?`<p class="muted">O salvamento na nuvem ainda não foi ativado no servidor. Use o arquivo de backup abaixo por enquanto.</p>`
+      :Sync.code?`<p>${Sync.state==='erro'?'Sem conexão agora. Os dados ficam no aparelho e vão para a nuvem assim que a internet voltar.':`Os dados de ${n>1?'todos os perfis':'este perfil'} estão salvos na nuvem${when?`, última cópia em ${when}`:''}.`}</p>
+        <div class="field"><label>Código deste app</label><div class="row"><b class="code">${fmtCode(Sync.code)}</b><button type="button" id="copyCode">Copiar código</button></div></div>
+        <p class="muted">Guarde esse código. Para ver os mesmos dados em outro celular (por exemplo, o da Ângela), abra o app lá, vá em Perfil e digite o código em "Usar em outro aparelho".</p>`
+      :`<p class="muted">Conectando com a nuvem...</p>`;
+    cloud+=`<details${Sync.state==='codigo'?' open':''}><summary>Usar em outro aparelho</summary><div class="row"><input id="syncIn" placeholder="XXXX-XXXX-XXXX" autocomplete="off" autocapitalize="characters" style="max-width:220px"><button type="button" id="syncGo">Entrar</button></div>
+      ${Sync.state==='codigo'?'<p class="muted">Código não encontrado. Confira as letras e tente de novo.</p>':'<p class="muted">Os dados deste aparelho são somados aos do código, nada é apagado.</p>'}</details>`;
+  }
+  return `<div class="card"><h2>Backup dos dados</h2>${cloud}
+    <div class="row"><button type="button" id="bkDown">Baixar arquivo de backup</button><label class="btn" for="bkFile">Restaurar de um arquivo</label><input id="bkFile" type="file" accept=".json,application/json" hidden></div>
+    <p class="muted">O arquivo guarda perfis, treinos, check-ins, pesos e fotos. Restaurar soma os dados do arquivo aos do aparelho.</p></div>`;
+}
+view.addEventListener('click',async e=>{
+  const id=e.target.id;
+  if(id==='copyCode'){try{await navigator.clipboard.writeText(fmtCode(Sync.code));toast('Código copiado')}catch(_){toast('Código: '+fmtCode(Sync.code))}}
+  if(id==='syncGo'){const c=(document.getElementById('syncIn').value||'').toUpperCase().replace(/[^A-Z0-9]/g,'');
+    if(c.length!==12){toast('O código tem 12 letras e números');return}
+    if(c===Sync.code){toast('Este aparelho já usa esse código');return}
+    toast('Buscando dados...');try{await Sync.run(c);toast('Pronto! Dados juntados.');render()}catch(_){render()}}
+  if(id==='bkDown'){const fotos=await allRecords();const blob=new Blob([JSON.stringify({app:'treino-sob-medida',versao:1,data:new Date().toISOString(),dados:packData(),fotos})],{type:'application/json'});
+    const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`treino-backup-${isoToday()}.json`;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(a.href),4000);toast('Backup baixado')}
+});
+view.addEventListener('change',async e=>{
+  if(e.target.id!=='bkFile')return;const f=e.target.files&&e.target.files[0];if(!f)return;
+  try{const j=JSON.parse(await f.text());if(j.app!=='treino-sob-medida'||!j.dados)throw 0;await mergeAll(j.dados,j.fotos);Sync.recDirty=true;save();toast('Backup restaurado');render()}
+  catch(_){toast('Esse arquivo não é um backup do app')}
+});
+Sync.init();
+try{navigator.storage&&navigator.storage.persist&&navigator.storage.persist()}catch(_){}
+if(Sync.on()){Sync.run();document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')Sync.run()})}
+
 /* ---------- render e eventos ---------- */
 function render(){
   renderWho();
@@ -854,7 +956,7 @@ view.addEventListener('click',e=>{
 
   if(id==='delP'){confirmDel=true;render()}
   if(id==='delNo'){confirmDel=false;render()}
-  if(id==='delYes'){const pid=P().id;S.profiles=S.profiles.filter(p=>p.id!==pid);delete S.logs[pid];S.active=S.profiles[0].id;confirmDel=false;save();toast('Perfil excluído');render()}
+  if(id==='delYes'){const pid=P().id;S.profiles=S.profiles.filter(p=>p.id!==pid);delete S.logs[pid];if(S.chat)delete S.chat[pid];(S.gone=S.gone||{})[pid]=Date.now();S.active=S.profiles[0].id;confirmDel=false;save();toast('Perfil excluído');render()}
 });
 view.addEventListener('submit',e=>{
   e.preventDefault();if(e.target.id==='extForm'){const key=document.getElementById('ext-key').value.trim();if(!key){toast('Cole a chave de API');return}

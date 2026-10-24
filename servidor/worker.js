@@ -1,6 +1,7 @@
 // Servidor do assistente do Treino Sob Medida (Cloudflare Worker).
 // Guarda a chave do Gemini como segredo (GEMINI_KEY) e repassa as conversas do app,
 // assim quem usa o app não precisa de chave nenhuma.
+// Também guarda o backup dos dados do app (rota /dados) num KV ligado como DADOS.
 
 const ALLOWED_ORIGINS = ['https://andrearanttes99.github.io'];
 // Tenta em ordem; se um modelo estiver aposentado, lotado ou no limite, passa para o próximo
@@ -23,6 +24,32 @@ function reply(status, body, origin) {
   });
 }
 
+// Backup: cada app tem um código de 12 letras/números; quem tem o código lê e grava os dados
+async function dados(data, env, origin) {
+  if (!env.DADOS) return reply(501, { erro: 'sem_kv' }, origin);
+  const codigo = String(data.codigo || '');
+  if (!/^[A-Z2-9]{12}$/.test(codigo)) return reply(400, { erro: 'codigo' }, origin);
+  if (data.acao === 'ler') {
+    const salvo = await env.DADOS.get('d:' + codigo, 'json');
+    return reply(200, { dados: salvo?.dados || null, fotosTs: salvo?.fotosTs || 0 }, origin);
+  }
+  if (data.acao === 'ler_fotos') {
+    return reply(200, { fotos: (await env.DADOS.get('f:' + codigo, 'json')) || [] }, origin);
+  }
+  if (data.acao === 'salvar') {
+    if (!data.dados || !Array.isArray(data.dados.profiles)) return reply(400, { erro: 'vazio' }, origin);
+    const antes = await env.DADOS.get('d:' + codigo, 'json');
+    let fotosTs = antes?.fotosTs || 0;
+    if (Array.isArray(data.fotos)) {
+      fotosTs = Date.now();
+      await env.DADOS.put('f:' + codigo, JSON.stringify(data.fotos));
+    }
+    await env.DADOS.put('d:' + codigo, JSON.stringify({ dados: data.dados, fotosTs }));
+    return reply(200, { ok: true, fotosTs }, origin);
+  }
+  return reply(400, { erro: 'acao' }, origin);
+}
+
 export default {
   async fetch(request, env) {
     const origin = request.headers.get('Origin') || '';
@@ -30,10 +57,12 @@ export default {
     if (request.method === 'GET') return reply(200, { ok: true, servico: 'Treino Sob Medida' }, origin);
     if (request.method !== 'POST') return reply(405, { erro: 'metodo' }, origin);
     if (!ALLOWED_ORIGINS.includes(origin)) return reply(403, { erro: 'origem' }, origin);
-    if (!env.GEMINI_KEY) return reply(500, { erro: 'sem_chave' }, origin);
 
     let data;
     try { data = await request.json(); } catch { return reply(400, { erro: 'json' }, origin); }
+    if (new URL(request.url).pathname === '/dados') return dados(data, env, origin);
+    if (!env.GEMINI_KEY) return reply(500, { erro: 'sem_chave' }, origin);
+
     const rules = String(data.rules || '').slice(0, 20000);
     const turns = (Array.isArray(data.turns) ? data.turns : []).slice(-14)
       .map(t => ({ role: t.role === 'assistant' ? 'model' : 'user', parts: [{ text: String(t.content || '').slice(0, 6000) }] }))
