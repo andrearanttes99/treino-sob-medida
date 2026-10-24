@@ -875,9 +875,10 @@ function renderBackup(){
     cloud+=`<details${Sync.state==='codigo'?' open':''}><summary>Usar em outro aparelho</summary><div class="row"><input id="syncIn" placeholder="XXXX-XXXX-XXXX" autocomplete="off" autocapitalize="characters" style="max-width:220px"><button type="button" id="syncGo">Entrar</button></div>
       ${Sync.state==='codigo'?'<p class="muted">Código não encontrado. Confira as letras e tente de novo.</p>':'<p class="muted">Os dados deste aparelho são somados aos do código, nada é apagado.</p>'}</details>`;
   }
+  if(window.claude&&!cloud)return '';
   return `<div class="card"><h2>Backup dos dados</h2>${cloud}
-    <div class="row"><button type="button" id="bkDown">Baixar arquivo de backup</button><label class="btn" for="bkFile">Restaurar de um arquivo</label><input id="bkFile" type="file" accept=".json,application/json" hidden></div>
-    <p class="muted">O arquivo guarda perfis, treinos, check-ins, pesos e fotos. Restaurar soma os dados do arquivo aos do aparelho.</p></div>`;
+    ${window.claude?'':`<div class="row"><button type="button" id="bkDown">Baixar arquivo de backup</button><label class="btn" for="bkFile">Restaurar de um arquivo</label><input id="bkFile" type="file" accept=".json,application/json" hidden></div>
+    <p class="muted">O arquivo guarda perfis, treinos, check-ins, pesos e fotos. Restaurar soma os dados do arquivo aos do aparelho.</p>`}</div>`;
 }
 view.addEventListener('click',async e=>{
   const id=e.target.id;
